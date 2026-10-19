@@ -1,0 +1,16 @@
+{
+  "name": "Catorcenas Claras",
+  "short_name": "Catorcenas",
+  "description": "Tus ingresos, gastos, deudas y lo que toca separar cada catorcena.",
+  "lang": "es-MX",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#12142A",
+  "theme_color": "#12142A",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
