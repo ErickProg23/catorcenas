@@ -560,6 +560,21 @@ label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;}
 .dayh b{color:var(--ink);font-weight:700;}
 .gday{margin-bottom:4px;}
 @media (prefers-reduced-motion: reduce){.gacc.flash{animation:none;}}
+.inbox{background:linear-gradient(160deg,rgba(255,179,138,.14),rgba(255,179,138,.04));border:1px solid rgba(255,179,138,.35);border-radius:22px;padding:14px 14px 6px;margin-bottom:16px;}
+.ib-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:0 4px 8px;}
+.ib-h b{font-size:15.5px;font-weight:800;}
+.ib-h span{font-size:12.5px;color:var(--ink-soft);}
+.ib-row{display:flex;align-items:center;gap:10px;padding:11px 4px;border-top:1px solid rgba(255,179,138,.18);}
+.ib-row .grow{flex:1;min-width:0;}
+.ib-row .t{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ib-row .s{display:block;font-size:12.5px;color:var(--ink-faint);margin-top:2px;}
+.ib-ok{padding:8px 14px;font-size:13.5px;}
+.ib-x{background:none;border:0;color:var(--ink-faint);font:inherit;font-size:13px;padding:8px 6px;cursor:pointer;}
+.ib-x:hover{color:var(--danger);}
+.mvrow{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:12.5px;}
+.mvnote{color:var(--sky);}
+.mvrow .linkbtn{font-size:12.5px;}
+.mvbtn{color:var(--ink-soft);}
 .sync{background:none;border:0;padding:6px 8px;margin:-6px -8px;border-radius:10px;cursor:pointer;font:inherit;font-size:11.5px;}
 .sync:hover{background:var(--surface-2);}
 .acct-row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--line);border-radius:14px;margin-top:12px;}
@@ -610,6 +625,7 @@ body.nologin .bnav, body.nologin #fabTop, body.nologin .tabs{display:none !impor
   </nav>
 </div>
 
+<script src="firebase-config.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -638,7 +654,7 @@ function parseAmt(raw){
 
 /* ---------- Estado ---------- */
 let db=null;
-const S={ anchor:null, salaries:{}, extras:{}, debts:{}, pays:{}, exps:{}, cats:{}, sep:{}, fixed:{}, goals:{}, gmoves:{}, loaded:{goals:false,gmoves:false,config:false,salaries:false,extras:false,debts:false,pays:false,exps:false,cats:false,sep:false,fixed:false} };
+const S={ anchor:null, salaries:{}, extras:{}, debts:{}, pays:{}, exps:{}, cats:{}, sep:{}, fixed:{}, goals:{}, gmoves:{}, inbox:{}, cardmap:{}, loaded:{goals:false,gmoves:false,config:false,salaries:false,extras:false,debts:false,pays:false,exps:false,cats:false,sep:false,fixed:false} };
 let offset=0, sheet=null, editing=null, kind='Trabajo extra';
 let tab='ingresos'; try{ const t=localStorage.getItem('cc2-tab'); if(['ingresos','gastos','deudas','separar'].includes(t)) tab=t; }catch(e){}
 
@@ -1381,7 +1397,7 @@ function renderGastos(){
   const maxC=Math.max(1,...cats.map(c=>c[1]));
   const shown= gCat ? list.filter(([,e])=>e.cat===gCat) : list;
   const isNow=gOff===0;
-  m.innerHTML=
+  m.innerHTML=inboxHtml()+
     '<div class="layout glayout"><div class="col-a">'+
       '<section class="gform" aria-label="Registrar gasto"><div class="sheet-head"><b>Registrar gasto</b></div><div id="gFields">'+expFields('g',G,false)+'</div>'+
       '<p class="err" id="gErr" hidden></p><button type="button" class="btn-primary add" id="gSave">Guardar gasto</button></section>'+
@@ -1422,6 +1438,7 @@ function renderGastos(){
   $('gPrev').onclick=()=>{ gOff--; gCat=null; animNext=true; renderGastos(); };
   $('gNext').onclick=()=>{ gOff++; gCat=null; animNext=true; renderGastos(); };
   if($('gNow')) $('gNow').onclick=()=>{ gOff=0; gCat=null; animNext=true; renderGastos(); };
+  wireInbox(m);
   m.querySelectorAll('[data-gg]').forEach(b=> b.onclick=()=>{ if(gGroup===b.dataset.gg) return; gGroup=b.dataset.gg; try{ localStorage.setItem('cc2-ggroup',gGroup); }catch(e){} renderGastos(); });
   m.querySelectorAll('[data-gacc]').forEach(b=> b.onclick=()=>{ const c=b.dataset.gacc, sec=b.closest('.acc'), open=!gOpen.has(c); if(open) gOpen.add(c); else gOpen.delete(c); sec.classList.toggle('open',open); b.setAttribute('aria-expanded',open); });
   m.querySelectorAll('[data-fc]').forEach(b=> b.onclick=()=>{
@@ -1458,10 +1475,13 @@ function fixedSectionHtml(){
     '</div></div></div></section>';
 }
 
-function openNewExp(){
+function openNewExp(pre){
   if(!(db && S.loaded.exps && S.loaded.debts && S.loaded.cats)) return;
-  const st={ amt:'', cat:null, method:G.method||'debit', cardId:G.method==='credit'?G.cardId:null, toDebt:null, date:null, note:'' };
-  openModal('<h3>Registrar gasto</h3><p class="sub">Se guarda en Gastos con su categoría y cómo pagaste.</p><div id="qFields">'+expFields('q',st,true)+'</div><p class="err" hidden></p>'+
+  if(pre && pre.type) pre=null; // llamado desde un clic
+  const st= pre ? Object.assign({ amt:'', cat:null, method:'debit', cardId:null, toDebt:null, date:null, note:'' }, pre)
+               : { amt:'', cat:null, method:G.method||'debit', cardId:G.method==='credit'?G.cardId:null, toDebt:null, date:null, note:'' };
+  const inboxId= pre ? pre.inboxId : null;
+  openModal('<h3>'+(inboxId?'Revisar compra':'Registrar gasto')+'</h3><p class="sub">'+(inboxId?'Llegó de Apple Pay'+(pre.rawCard?' · '+esc(pre.rawCard):'')+'. Elige la categoría y revisa cómo pagaste.':'Se guarda en Gastos con su categoría y cómo pagaste.')+'</p><div id="qFields">'+expFields('q',st,true)+'</div><p class="err" hidden></p>'+
     '<div class="actions"><button type="button" class="btn-ghost" data-close>Cancelar</button><button type="button" class="btn-primary grow" id="qSave">Guardar gasto</button></div>', box=>{
     const fields=box.querySelector('#qFields'), save=box.querySelector('#qSave');
     const repaint=()=>{ fields.innerHTML=expFields('q',st,true); wireExpFields(fields,'q',st,repaint); onEnter(box,save); };
@@ -1469,7 +1489,8 @@ function openNewExp(){
     save.onclick=async()=>{
       const {err:er,data}=expData(st,box,'q'); if(er) return mErr(box,er);
       save.disabled=true; save.textContent='Guardando…';
-      const ok=await saved(db.collection('expenses').add(data));
+      const learn= inboxId ? [db.doc('config/cardmap').set(Object.assign({}, S.cardmap||{}, { [cardKey(pre.rawCard)]:{ method:st.method, cardId:st.method==='credit'?st.cardId:null } }))] : [];
+      const ok=await saved(Promise.all([db.collection('expenses').add(data), ...(inboxId?[db.collection('inbox').doc(inboxId).delete()]:[]), ...learn]));
       if(!ok){ save.disabled=false; save.textContent='Guardar gasto'; return; }
       G.method=st.method; G.cardId=st.cardId;
       closeModal(); toast('Gasto de '+money2(data.amount)+' en '+data.cat+' guardado'+(data.toDebt?' · sumado a '+data.cardName:''));
@@ -1634,12 +1655,21 @@ function computeSep(){
         const diff=shares[0]-(Number(r0.amount)||0), per=diff/(e.W.length-1);
         for(let i=1;i<shares.length;i++) shares[i]=Math.max(0,cents(shares[i]+per));
       }
+      // Lo que decidiste pasar de una catorcena a la siguiente (siempre antes de la fecha de pago).
+      const mOut=e.W.map(()=>0), mIn=e.W.map(()=>0), mFrom=e.W.map(()=>[]);
+      if(!paid) recs.filter(r=>r.move && r.id===id && r.key===e.key && r.from>=start).sort((a,b)=>a.from.localeCompare(b.from)).forEach(r=>{
+        const i=e.W.indexOf(r.from), j=e.W.indexOf(r.to); if(i<0 || j<=i) return;
+        const x=cents(Math.min(Number(r.amount)||0, shares[i])); if(x<=0) return;
+        shares[i]=cents(shares[i]-x); shares[j]=cents(shares[j]+x); mOut[i]=cents(mOut[i]+x); mIn[j]=cents(mIn[j]+x); mFrom[j].push(r.from);
+      });
       e.W.forEach((p,i)=>{
         if(!plan[p]) return;
         if(paid && p>start) return; // ya pagado: nada más que separar después
         const rec=recAt(p,id,e.key);
-        if(shares[i]<=0.005 && !rec && !paid && !(p===start && (already>0 || (pinfo && !pinfo.ext)))) return;
-        plan[p].push({ id, name, grp: e.kind==='extra'?'extra':grp, kind:e.kind, due:e.date, key:e.key, amount:amt, toPay, paidAmt: pinfo&&!pinfo.ext?pinfo.amount:0, share:shares[i], part:i+1, of:e.W.length, already, liq, urgent:!!e.urgent, rec, paid, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'' });
+        if(shares[i]<=0.005 && !rec && !paid && !mOut[i] && !(p===start && (already>0 || (pinfo && !pinfo.ext)))) return;
+        const canMove= e.kind==='due' && !paid && !rec && i<e.W.length-1 && shares[i]>0.5;
+        plan[p].push({ id, name, grp: e.kind==='extra'?'extra':grp, kind:e.kind, due:e.date, key:e.key, amount:amt, toPay, paidAmt: pinfo&&!pinfo.ext?pinfo.amount:0, share:shares[i], part:i+1, of:e.W.length, already, liq, urgent:!!e.urgent, rec, paid, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'',
+          movedOut:mOut[i], movedTo:mOut[i]?e.W[i+1]:null, movedIn:mIn[i], movedFrom:mFrom[i], moveTo:canMove?e.W[i+1]:null, payday:p });
       });
     });
   };
@@ -1705,13 +1735,18 @@ function sepItemHtml(it, ix, isNow, p){
   if(it.already>0 && it.part===1) notes.push(it.already>=(it.toPay!=null?it.toPay:it.amount)-0.5 ? 'Ya tenías todo separado' : 'Ya tenías '+money(it.already)+' separado');
   if(it.liq) notes.push('Con este pago se liquida');
   if(it.urgent) notes.push('Cae antes de tu siguiente cobro');
+  if(it.movedIn>0) notes.push('Incluye '+money(it.movedIn)+' que pasaste del '+it.movedFrom.map(x=>fmt(parseDate(x))).join(' y '));
   if(done && !it.paid && Math.abs(got-it.share)>0.5) notes.push(got<it.share ? 'Separaste '+money(got)+' · lo que falta pasa a las siguientes' : 'Separaste '+money(got)+' · lo de más se descuenta después');
   const pop = popKey && popKey===sepKey(p,it.id,it.key);
   return '<div class="sitem'+(done?' done':'')+(it.paid?' isPaid':'')+'" data-ix="'+ix+'">'+
     (isNow?'<label class="scheck'+(pop?' pop':'')+'" aria-label="Separado: '+esc(it.name)+'"><input type="checkbox" data-chk="'+ix+'"'+(done?' checked':'')+(it.share<=0.005&&!done?' disabled':'')+'><span aria-hidden="true"></span></label>':'')+
     '<div class="sinfo"><button type="button" class="sbody" data-open="'+ix+'"'+(isNow?'':' disabled')+'><span class="t">'+esc(it.name)+(it.liq?' <span class="badge">Último pago</span>':'')+'</span><span class="s">'+sub+'</span>'+
       (notes.length?'<span class="s note2">'+notes.join(' · ')+'</span>':'')+'</button>'+
-      payStateHtml(it, ix, isNow, 'pay')+'</div>'+
+      payStateHtml(it, ix, isNow, 'pay')+
+      ((it.movedOut>0 || it.moveTo) ? '<div class="mvrow">'+
+        (it.movedOut>0 ? '<span class="mvnote">Pasaste '+money(it.movedOut)+' al '+fmt(parseDate(it.movedTo))+'</span><button type="button" class="linkbtn" data-unmv="'+ix+'">Deshacer</button>' : '')+
+        (it.moveTo ? '<button type="button" class="linkbtn mvbtn" data-mv="'+ix+'">'+(it.movedOut>0?'Pasar más':'Pasar al '+fmt(parseDate(it.moveTo)))+'</button>' : '')+
+      '</div>' : '')+'</div>'+
     '<span class="samt">'+money2(done?got:it.share)+'</span></div>';
 }
 function pendingHtml(it, ix){
@@ -1724,6 +1759,29 @@ function pendingHtml(it, ix){
     '<span class="samt">'+money2(it.toPay!=null?it.toPay:it.amount)+'</span></div>';
 }
 
+/* Pasar parte de lo que toca separar a la siguiente catorcena (antes de la fecha de pago). */
+function mvKey(it){ return 'mv_'+it.payday+'_'+it.id+'_'+it.key; }
+function openMoveSep(it){
+  const prev=S.sep[mvKey(it)];
+  openModal('<h3>Pasar '+esc(it.name)+' a la siguiente catorcena</h3><p class="sub">Esta catorcena te toca separar '+money2(it.share)+' para el pago del '+fmtLong(parseDate(it.due))+'. Lo que pases se suma a tu pago del <b>'+fmtLong(parseDate(it.moveTo))+'</b>, que todavía llega antes de la fecha.</p>'+
+    '<div class="field"><label for="mAmt">¿Cuánto pasas?</label><input class="amount-in" id="mAmt" type="text" inputmode="decimal" autocomplete="off" value="'+it.share+'"></div>'+
+    '<p class="err" hidden></p><div class="actions"><button type="button" class="btn-ghost" data-close>Cancelar</button><button type="button" class="btn-primary grow" id="mSave">Pasar al '+fmt(parseDate(it.moveTo))+'</button></div>', box=>{
+    const save=box.querySelector('#mSave'); onEnter(box,save);
+    save.onclick=async()=>{
+      const v=parseAmt(box.querySelector('#mAmt').value);
+      if(!isFinite(v)||v<=0) return mErr(box,'Escribe cuánto quieres pasar.');
+      if(v>it.share+0.005) return mErr(box,'Máximo '+money2(it.share)+', que es lo que toca esta catorcena.');
+      save.disabled=true;
+      const ok=await saved(db.collection('sepDone').doc(mvKey(it)).set({ move:true, id:it.id, key:it.key, from:it.payday, to:it.moveTo, amount:cents((prev?Number(prev.amount)||0:0)+v), ts:Date.now() }));
+      if(!ok){ save.disabled=false; return; }
+      closeModal(); toast(money2(v)+' de '+it.name+' pasan a tu pago del '+fmt(parseDate(it.moveTo)));
+    };
+  });
+}
+async function undoMoveSep(it){
+  if(!await askConfirm({ title:'¿Regresar '+money(it.movedOut)+' a esta catorcena?', msg:'Vuelve a quedar como estaba: esta catorcena separas tu parte de '+esc(it.name)+' y la del '+fmt(parseDate(it.movedTo))+' baja.', ok:'Sí, regresar', warn:false })) return;
+  const ok=await saved(db.collection('sepDone').doc(mvKey(it)).delete()); if(ok) toast('Listo, '+it.name+' regresó a esta catorcena');
+}
 /* Registrar que ya pagaste: un pago fijo se guarda como gasto; una deuda o abono extra, como abono que baja su saldo. */
 function occOf(it){ return it.id+'|'+it.key; }
 function openPaySep(it){
@@ -1916,6 +1974,8 @@ function renderSeparar(){
     toast(c.checked ? money2(it.share)+' separado para '+it.name : 'Desmarcado '+it.name);
   });
   m.querySelectorAll('[data-open]').forEach(b=> b.onclick=()=>{ if(isNow) openSepItem(list[Number(b.dataset.open)], p); });
+  m.querySelectorAll('[data-mv]').forEach(b=> b.onclick=()=> openMoveSep(list[Number(b.dataset.mv)]));
+  m.querySelectorAll('[data-unmv]').forEach(b=> b.onclick=()=> undoMoveSep(list[Number(b.dataset.unmv)]));
   m.querySelectorAll('[data-pay]').forEach(b=> b.onclick=()=>{ const it=list[Number(b.dataset.pay)]; if(it.paid) openPaidInfo(it); else openPaySep(it); });
   m.querySelectorAll('[data-ppay]').forEach(b=> b.onclick=()=> openPaySep(pending[Number(b.dataset.ppay)]));
   m.querySelectorAll('[data-pext]').forEach(b=> b.onclick=async()=>{
@@ -2314,16 +2374,59 @@ function openGoalForm(gid){
 }
 
 
+/* ---------- Por revisar (compras que llegan solas, p. ej. de Apple Pay) ----------
+   Cada documento de inbox trae texto tal cual lo manda el atajo: amount ("$1,250.50"), merchant, card, date. */
+function inboxAmt(raw){
+  let t=String(raw||'').replace(/[^\d.,-]/g,''); if(!t) return NaN;
+  if(t.includes(',') && t.includes('.')) t= t.lastIndexOf(',')>t.lastIndexOf('.') ? t.replace(/\./g,'').replace(',','.') : t.replace(/,/g,'');
+  else if(t.includes(',')) t= /,\d{1,2}$/.test(t) ? t.replace(',','.') : t.replace(/,/g,'');
+  return Math.abs(Number(t));
+}
+function inboxDate(raw){
+  const t=String(raw||'');
+  if(/\d{4}-\d{2}-\d{2}T\d/.test(t)){ const d=new Date(t); if(!isNaN(d)) return iso(new Date(d.getFullYear(),d.getMonth(),d.getDate())); }
+  const m=t.match(/(\d{4})-(\d{2})-(\d{2})/); if(m) return m[0];
+  const d=new Date(t); return isNaN(d) ? iso(today()) : iso(new Date(d.getFullYear(),d.getMonth(),d.getDate()));
+}
+const cardKey=raw=> String(raw||'').trim().toLowerCase().replace(/[^a-z0-9áéíóúñ ]/g,'').slice(0,60) || 'tarjeta';
+// Cómo pagaste con esa tarjeta de Wallet: lo que elegiste la última vez; si nunca, se adivina por el nombre.
+function inboxPay(raw){
+  const m=(S.cardmap||{})[cardKey(raw)];
+  if(m && (m.method!=='credit' || S.debts[m.cardId])) return { method:m.method, cardId:m.method==='credit'?m.cardId:null, learned:true };
+  const t=String(raw||'').toLowerCase();
+  if(/d[eé]bito|n[oó]mina|libret[oó]n/.test(t)) return { method:'debit', cardId:null };
+  const cid=inboxCard(raw); return cid ? { method:'credit', cardId:cid } : { method:'debit', cardId:null };
+}
+function inboxCard(raw){
+  const t=String(raw||'').toLowerCase(); if(!t) return null;
+  const hit=debtsOf('card').find(([,d])=> t.includes(String(d.name).toLowerCase()));
+  return hit ? hit[0] : null;
+}
+function inboxList(){ return Object.entries(S.inbox||{}).sort((a,b)=>String(b[1].date||'').localeCompare(String(a[1].date||''))); }
+function inboxHtml(){
+  const L=inboxList(); if(!L.length) return '';
+  return '<section class="inbox" aria-label="Compras por revisar"><div class="ib-h"><b>Por revisar</b><span>'+L.length+' compra'+(L.length===1?'':'s')+' de Apple Pay</span></div>'+
+    L.map(([id,x])=>{ const a=inboxAmt(x.amount), pay=inboxPay(x.card), cid=pay.cardId;
+      return '<div class="ib-row"><span class="grow"><span class="t">'+(isFinite(a)?money2(a):esc(x.amount||'?'))+' · '+esc(x.merchant||'Compra')+'</span>'+
+        '<span class="s">'+fmtLong(parseDate(inboxDate(x.date)))+' · '+esc(x.card||'Tarjeta')+(cid?' · crédito '+esc(debtLabel(cid)):pay.learned?' · débito':'')+'</span></span>'+
+        '<button type="button" class="ib-x" data-ibx="'+id+'" aria-label="Descartar">Descartar</button><button type="button" class="btn-primary ib-ok" data-ibok="'+id+'">Revisar</button></div>';
+    }).join('')+'</section>';
+}
+function wireInbox(m){
+  m.querySelectorAll('[data-ibok]').forEach(b=> b.onclick=()=>{
+    const id=b.dataset.ibok, x=S.inbox[id]; if(!x) return; const a=inboxAmt(x.amount), pay=inboxPay(x.card);
+    openNewExp({ amt:isFinite(a)?String(a):'', method:pay.method, cardId:pay.cardId, date:inboxDate(x.date), note:String(x.merchant||'').slice(0,60), inboxId:id, rawCard:x.card||'' });
+  });
+  m.querySelectorAll('[data-ibx]').forEach(b=> b.onclick=async()=>{
+    const id=b.dataset.ibx, x=S.inbox[id]; if(!x) return;
+    if(!await askConfirm({ title:'¿Descartar esta compra?', msg:'No se registra como gasto. Úsalo si fue un error o si ya la registraste a mano.', detail:'<b>'+esc(x.amount||'')+'</b> · '+esc(x.merchant||''), ok:'Sí, descartar' })) return;
+    const ok=await saved(db.collection('inbox').doc(id).delete()); if(ok) toast('Compra descartada');
+  });
+}
+
 /* ---------- Firebase (versión web) ----------
    Pega aquí la configuración de tu proyecto (Firebase › Configuración del proyecto › Tus apps › Web). */
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAK5iC5sN4gdHJxAmO9q-7w_20yl0MJcLw",
-  authDomain: "catorcenas-claras.firebaseapp.com",
-  projectId: "catorcenas-claras",
-  storageBucket: "catorcenas-claras.firebasestorage.app",
-  messagingSenderId: "1081235663918",
-  appId: "1:1081235663918:web:bcd5f8aecf46af3ac443bf"
-};
+const FIREBASE_CONFIG = window.FIREBASE_CONFIG || { apiKey:'PEGA_AQUI' }; // viene de firebase-config.js
 const COLLS=['salaries','extras','debts','debtPayments','expenses','goals','goalMoves','fixed','sepDone','expCats'];
 const STATE_OF={ salaries:'salaries', extras:'extras', debts:'debts', debtPayments:'pays', expenses:'exps', goals:'goals', goalMoves:'gmoves', fixed:'fixed', sepDone:'sep', expCats:'cats' };
 let fbUser=null, fsdb=null, offeredImport=false;
@@ -2357,7 +2460,7 @@ function connectFirebase(){
   return new Promise(resolve=>{
     if(!window.firebase){ resolve(null); return; }
     if(String(FIREBASE_CONFIG.apiKey).startsWith('PEGA')){
-      main().innerHTML='<section class="welcome"><h2>Falta configurar Firebase</h2><p>Abre <b>index.html</b> y pega la configuración de tu proyecto en <code>FIREBASE_CONFIG</code>. La guía te dice dónde encontrarla.</p></section>'; setSync('off'); resolve('wait'); return;
+      main().innerHTML='<section class="welcome"><h2>Falta configurar Firebase</h2><p>No encontré tu configuración. Revisa que subiste <b>firebase-config.js</b> junto a index.html y que no quedó ningún <code>PEGA_AQUI</code>.</p></section>'; setSync('off'); resolve('wait'); return;
     }
     if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     fsdb=firebase.firestore(); try{ fsdb.settings({ ignoreUndefinedProperties:true, merge:true }); }catch(e){}
@@ -2399,15 +2502,48 @@ function pickImport(){
   inp.onchange=()=>{ if(inp.files && inp.files[0]) importBackup(inp.files[0]); };
   inp.click();
 }
+function randKey(){ const a=new Uint8Array(18); crypto.getRandomValues(a); return Array.from(a,b=>'abcdefghijkmnpqrstuvwxyz23456789'[b%32]).join(''); }
+function inboxUrl(){ return 'https://firestore.googleapis.com/v1/projects/'+FIREBASE_CONFIG.projectId+'/databases/(default)/documents/users/'+fbUser.uid+'/inbox?key='+FIREBASE_CONFIG.apiKey; }
+function inboxTemplate(key){ return '{"fields":{"amount":{"stringValue":"MONTO"},"merchant":{"stringValue":"COMERCIO"},"card":{"stringValue":"TARJETA"},"date":{"stringValue":"FECHA"},"key":{"stringValue":"'+key+'"}}}'; }
+async function copyText(t,label){ try{ await navigator.clipboard.writeText(t); toast(label+' copiado'); }catch(e){ prompt('Copia esto:',t); } }
+async function openApplePay(){
+  const ref=db.collection('private').doc('inbox');
+  let key=null; try{ const d=await ref.get(); key=d.exists ? d.data().key : null; }catch(e){}
+  if(!key){ key=randKey(); const ok=await saved(ref.set({ key, created:Date.now() })); if(!ok) return; }
+  openModal('<h3>Compras automáticas con Apple Pay</h3><p class="sub">Cada vez que pagues con tu tarjeta en Wallet, la compra llega sola a <b>Gastos › Por revisar</b>. Tú solo eliges la categoría.</p>'+
+    '<div class="acct-btns"><button type="button" id="apUrl">1. Copiar la dirección<small>Va en la acción "Obtener contenido de URL" del atajo.</small></button>'+
+    '<button type="button" id="apTpl">2. Copiar la plantilla<small>Va en la acción "Texto". Luego cambias MONTO, COMERCIO, TARJETA y FECHA por las variables.</small></button>'+
+    '<button type="button" id="apTest">Probar envío<small>Manda una compra de prueba de $1.00 para ver que todo funcione.</small></button>'+
+    '<button type="button" id="apNew">Cambiar clave<small>Si crees que alguien vio tu clave. Tendrás que volver a copiar la plantilla en el atajo.</small></button></div>'+
+    '<p class="note">La guía <b>APPLE-PAY.md</b> tiene los pasos con detalle.</p>', box=>{
+    box.querySelector('#apUrl').onclick=()=>copyText(inboxUrl(),'Dirección');
+    box.querySelector('#apTpl').onclick=()=>copyText(inboxTemplate(key),'Plantilla');
+    box.querySelector('#apTest').onclick=async e=>{
+      const b=e.currentTarget; b.disabled=true;
+      const body=inboxTemplate(key).replace('MONTO','$1.00').replace('COMERCIO','Prueba de Apple Pay').replace('TARJETA','Prueba').replace('FECHA',new Date().toISOString());
+      try{ const r=await fetch(inboxUrl(),{ method:'POST', headers:{'Content-Type':'application/json'}, body });
+        if(r.ok){ closeModal(); toast('¡Funciona! Revisa Gastos › Por revisar'); }
+        else { const t=await r.text(); toast(r.status===403?'Firebase rechazó la prueba: revisa que publicaste las reglas nuevas (firestore.rules).':'Error '+r.status+': '+t.slice(0,120),true); }
+      }catch(err){ toast('No se pudo enviar: '+err.message,true); }
+      b.disabled=false;
+    };
+    box.querySelector('#apNew').onclick=async()=>{
+      if(!await askConfirm({ title:'¿Cambiar la clave?', msg:'El atajo que ya tienes dejará de funcionar hasta que pegues la plantilla nueva.', ok:'Sí, cambiar', warn:false })) return;
+      const ok=await saved(ref.set({ key:randKey(), created:Date.now() })); if(ok){ closeModal(); toast('Clave cambiada'); openApplePay(); }
+    };
+  });
+}
 function openAccount(){
   if(!fbUser) return;
   openModal('<h3>Tu cuenta</h3><p class="sub">Tus datos están en tu propio Firebase y se sincronizan entre tu celular y tu PC.</p>'+
     '<div class="acct-row">'+(fbUser.photoURL?'<img src="'+esc(fbUser.photoURL)+'" alt="" width="36" height="36" style="border-radius:50%" referrerpolicy="no-referrer">':'')+'<span class="who">'+esc(fbUser.displayName||'')+'<small>'+esc(fbUser.email||'')+'</small></span></div>'+
     '<div class="acct-btns"><button type="button" id="aExp">Descargar respaldo<small>Un archivo con todos tus datos. Guárdalo de vez en cuando.</small></button>'+
+    '<button type="button" id="aAp">Compras automáticas con Apple Pay<small>Configura el atajo de tu iPhone para que tus compras lleguen solas.</small></button>'+
     '<button type="button" id="aImp">Importar respaldo<small>Carga un archivo de respaldo (por ejemplo, el que te pasé de Claude).</small></button>'+
     '<button type="button" id="aOut">Cerrar sesión<small>Tus datos se quedan en la nube.</small></button></div>', box=>{
     box.querySelector('#aExp').onclick=downloadBackup;
     box.querySelector('#aImp').onclick=pickImport;
+    box.querySelector('#aAp').onclick=()=>{ closeModal(); openApplePay(); };
     box.querySelector('#aOut').onclick=async()=>{ if(!await askConfirm({ title:'¿Cerrar sesión?', msg:'Tendrás que volver a entrar con Google. Tus datos no se borran.', ok:'Sí, cerrar sesión', warn:false })) return; closeModal(); firebase.auth().signOut(); };
   });
 }
@@ -2430,6 +2566,8 @@ async function start(){
   db.collection('goalMoves').onSnapshot(s=>{ const n={}; s.docs.forEach(d=>n[d.id]=d.data()); S.gmoves=n; S.loaded.gmoves=true; render(); }, fail);
   db.collection('fixed').onSnapshot(s=>{ const n={}; s.docs.forEach(d=>n[d.id]=d.data()); S.fixed=n; S.loaded.fixed=true; render(); }, fail);
   db.collection('sepDone').onSnapshot(s=>{ const n={}; s.docs.forEach(d=>n[d.id]=d.data()); S.sep=n; S.loaded.sep=true; render(); }, fail);
+  db.doc('config/cardmap').onSnapshot(s=>{ S.cardmap= s.exists ? (s.data()||{}) : {}; }, ()=>{});
+  db.collection('inbox').onSnapshot(s=>{ const n={}; s.docs.forEach(d=>n[d.id]=d.data()); S.inbox=n; if(tab==='gastos') render(); }, ()=>{});
   db.collection('expCats').onSnapshot(s=>{ const n={}; s.docs.forEach(d=>n[d.id]=d.data()); S.cats=n; S.loaded.cats=true; render(); }, fail);
 }
 document.querySelectorAll('.tab').forEach(b=> b.addEventListener('click',()=>{ if(tab===b.dataset.tab) return; tab=b.dataset.tab; animNext=true; sheet=null; editing=null; try{ localStorage.setItem('cc2-tab',tab); }catch(e){} render(); const m=main(); m.classList.remove('fade-in'); void m.offsetWidth; m.classList.add('fade-in'); window.scrollTo({top:0}); }));
