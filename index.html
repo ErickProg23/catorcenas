@@ -575,6 +575,11 @@ label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;}
 .mvnote{color:var(--sky);}
 .mvrow .linkbtn{font-size:12.5px;}
 .mvbtn{color:var(--ink-soft);}
+button.dd-pay{width:100%;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:9px 6px;font:inherit;color:inherit;text-align:left;cursor:pointer;align-items:center;}
+button.dd-pay:hover{background:var(--surface-2);}
+button.dd-pay b{margin-left:auto;}
+button.dd-pay span{color:var(--ink-soft);}
+button.dd-pay svg{width:14px;height:14px;margin-left:8px;opacity:.6;flex:none;}
 .sync{background:none;border:0;padding:6px 8px;margin:-6px -8px;border-radius:10px;cursor:pointer;font:inherit;font-size:11.5px;}
 .sync:hover{background:var(--surface-2);}
 .acct-row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--line);border-radius:14px;margin-top:12px;}
@@ -965,11 +970,12 @@ function openDebtDetail(id){
       '<div class="dd-bal">'+money2(bal)+'</div><div class="dd-sub">'+(bal<=0.5?'Liquidada':'Saldo actual')+'</div></div>'+
     '<div class="dd-prog"><div class="l"><span>Pagado</span><span>'+(paidSome? Math.round(pct)+'% de '+money(orig) : 'Empieza a contar con tu primer abono')+'</span></div><div class="bar"><span style="width:'+pct+'%"></span></div></div>'+
     '<dl class="dd-rows">'+rows.map(r=>'<div><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>').join('')+'</dl>'+
-    '<div class="dd-pays"><div class="dd-pays-h">Últimos abonos</div>'+(pays.length? pays.map(([,p])=>'<div class="dd-pay"><span>'+fmtLong(parseDate(p.date))+((p.ts||0)<=baseTs?' <em>ya incluido en el saldo</em>':'')+'</span><b>'+money2(p.amount)+'</b></div>').join('') : '<p class="note" style="margin:4px 0 0">Aún no registras abonos.</p>')+'</div>'+
+    '<div class="dd-pays"><div class="dd-pays-h">Últimos abonos</div>'+(pays.length? pays.map(([pid,p])=>'<button type="button" class="dd-pay" data-pedit="'+pid+'"><span>'+fmtLong(parseDate(p.date))+((p.ts||0)<=baseTs?' <em>ya incluido en el saldo</em>':'')+'</span><b>'+money2(p.amount)+'</b>'+PEN+'</button>').join('')+'<p class="hint" style="margin:6px 0 0">Toca un abono para corregirlo o borrarlo.</p>' : '<p class="note" style="margin:4px 0 0">Aún no registras abonos.</p>')+'</div>'+
     '<div class="actions"><button type="button" class="btn-primary grow" id="ddPay">Abonar</button><button type="button" class="grow" id="ddFix">Corregir saldo</button></div>'+
     '<div class="dd-foot"><button type="button" class="linkbtn" id="ddEdit">Editar datos de la deuda</button><button type="button" class="linkbtn" data-close>Cerrar</button></div>', box=>{
     box.querySelector('#ddPay').onclick=()=> openPay(id);
     box.querySelector('#ddFix').onclick=()=> openFix(id);
+    box.querySelectorAll('[data-pedit]').forEach(b=> b.onclick=()=> openPayEdit(b.dataset.pedit, id));
     box.querySelector('#ddEdit').onclick=()=> openDebtForm(id);
     box.querySelectorAll('[data-unsnow]').forEach(b=> b.onclick=async()=>{ const sn=(d.snows||[])[Number(b.dataset.unsnow)]; if(!sn) return;
       if(!await askConfirm({ title:'¿Quitar esta bola de nieve?', msg:'Separar dejará de pedirte este abono extra para '+esc(d.name)+'.'+(sn.srcName?' '+esc(sn.srcName)+' te lo volverá a sugerir.':''), detail:'<b>'+money(sn.amount)+'</b> por catorcena desde el '+fmtLong(parseDate(sn.from)), ok:'Sí, quitar' })) return;
@@ -1829,9 +1835,13 @@ function openPaySep(it){
     return;
   }
   const bal=balanceOf(debtId);
+  const partial= it.kind==='due' && it.of>1 && it.part<it.of && it.toPay>0;
+  const thisCat= partial ? cents(Math.min(it.toPay, it.rec ? Number(it.rec.amount)||0 : it.share)) : 0;
+  const dflt= partial && thisCat>0 ? thisCat : rest;
   openModal('<h3>Pagar '+esc(it.name)+'</h3><p class="sub">'+dueTxt[0].toUpperCase()+dueTxt.slice(1)+'. Se registra como abono y baja tu saldo de '+money2(bal)+'.</p>'+
     (it.paidAmt>0?'<p class="note" style="margin:0 0 4px">Ya pagaste '+money2(it.paidAmt)+' de '+money2(it.amount)+'.</p>':'')+
-    '<div class="field"><label for="mAmt">Monto que pagaste</label><input class="amount-in" id="mAmt" type="text" inputmode="decimal" autocomplete="off" value="'+rest+'"></div>'+
+    '<div class="field"><label for="mAmt">Monto que pagaste</label><input class="amount-in" id="mAmt" type="text" inputmode="decimal" autocomplete="off" value="'+dflt+'"></div>'+
+    (partial && thisCat>0 ? '<p class="hint" style="margin:-4px 0 10px">Puse lo de esta catorcena ('+money2(thisCat)+'). Si pagaste el pago completo ('+money2(rest)+'), cámbialo.</p>' : '')+
     '<div class="field"><label for="mDate">Fecha en que pagaste</label><input id="mDate" type="date" value="'+iso(today())+'"></div>'+
     '<label class="chk"><input type="checkbox" id="mIncl"> Ya está descontado del saldo que capturé</label>'+
     '<p class="live" id="mLive"></p><p class="err" hidden></p>'+
@@ -1849,6 +1859,30 @@ function openPaySep(it){
       const ok=await saved(db.collection('debtPayments').add({ debtId, amount:cents(v), date, ts, occ:occOf(it) }));
       if(!ok){ save.disabled=false; save.textContent='Guardar abono'; return; }
       closeModal(); toast('Abono de '+money2(v)+' a '+it.name+' guardado');
+    };
+  });
+}
+/* Corregir o borrar un abono ya registrado. */
+function openPayEdit(pid, backTo){
+  const p=S.pays[pid]; if(!p) return; const d=S.debts[p.debtId]||{};
+  const incl=(p.ts||0)<=(Number(d.baseTs)||0);
+  openModal('<h3>Abono a '+esc(d.name||'')+'</h3><p class="sub">'+(incl?'Este abono ya estaba incluido en el saldo que capturaste: corregirlo no mueve tu saldo, solo lo que cuenta como pagado.':'Si cambias el monto, tu saldo se ajusta solo.')+'</p>'+
+    '<div class="field"><label for="mAmt">Monto</label><input class="amount-in" id="mAmt" type="text" inputmode="decimal" autocomplete="off" value="'+p.amount+'"></div>'+
+    '<div class="field"><label for="mDate">Fecha</label><input id="mDate" type="date" value="'+(p.date||iso(today()))+'"></div>'+
+    '<p class="err" hidden></p><div class="actions"><button type="button" class="btn-danger" id="mDel">Borrar</button><button type="button" class="btn-primary grow" id="mSave">Guardar cambios</button></div>', box=>{
+    const save=box.querySelector('#mSave'); onEnter(box,save);
+    save.onclick=async()=>{
+      const v=parseAmt(box.querySelector('#mAmt').value); if(!isFinite(v)||v<=0) return mErr(box,'Escribe el monto del abono.');
+      const date=box.querySelector('#mDate').value; if(!date) return mErr(box,'Elige la fecha.');
+      save.disabled=true;
+      const ok=await saved(db.collection('debtPayments').doc(pid).update({ amount:cents(v), date }));
+      if(!ok){ save.disabled=false; return; }
+      closeModal(); toast('Abono corregido a '+money2(v)); if(backTo) openDebtDetail(backTo);
+    };
+    box.querySelector('#mDel').onclick=async()=>{
+      if(!await askConfirm({ title:'¿Borrar este abono?', msg: incl ? 'Ya estaba incluido en tu saldo, así que el saldo no cambia; el pago vuelve a quedar pendiente en Separar.' : 'Tu saldo de '+esc(d.name||'')+' sube de nuevo y el pago vuelve a quedar pendiente en Separar.', detail:'<b>'+money2(p.amount)+'</b> el '+fmtLong(parseDate(p.date)), ok:'Sí, borrar abono' })) return;
+      const ok=await saved(db.collection('debtPayments').doc(pid).delete());
+      if(ok){ closeModal(); toast('Abono borrado'); if(backTo) openDebtDetail(backTo); }
     };
   });
 }
