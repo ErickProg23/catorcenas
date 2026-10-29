@@ -1648,7 +1648,11 @@ function computeSep(){
       const amt=cents(e.amount);
       const liq=!paid && grp==='debt' && remaining<=0.5;
       // Si ya está pagado completo, lo que tocaba separar en esta catorcena se sigue mostrando (y contando).
-      const already=before(id,e.key), need=Math.max(0,cents((paid?amt:toPay)-already));
+      // Lo que ya abonaste salió de lo que separaste en el plan (hasta donde alcance lo separado);
+      // por eso eso sigue contando como "separado" y no se le vuelve a restar a las siguientes catorcenas.
+      const recSum=e.W.filter(p=>p>=start).reduce((s,p)=>{ const r=recAt(p,id,e.key); return s+(r?Number(r.amount)||0:0); },0);
+      const paidFromPlan= pinfo && !pinfo.ext ? Math.min(Number(pinfo.amount)||0, recSum) : 0;
+      const already=before(id,e.key), need=Math.max(0,cents((paid?amt:toPay+paidFromPlan)-already));
       const shares=splitEven(need, e.W.length);
       const r0=e.W[0]===start ? recAt(start,id,e.key) : null;
       if(r0 && e.W.length>1){
