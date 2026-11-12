@@ -1613,10 +1613,12 @@ function computeSep(){
     const amt0=Number(d.amount)||0, extra=Number(d.extra)||0;
     const ev=[];
     { const pend=[];
-      if(d.freq==='catorcena') pastPaydays.forEach(x=>pend.push({kind:'due', date:x, key:x}));
-      else dueList(d, parseDate(lo), addDays(parseDate(start),-1)).map(iso).forEach(x=>pend.push({kind:'due', date:x, key:x}));
-      if(extra>0 && grp==='debt') pastPaydays.forEach(x=>pend.push({kind:'extra', date:x, key:'x'+x}));
-      if(grp==='debt') pastPaydays.forEach(x=>{ if(snowAt(d,x)>0) pend.push({kind:'extra', date:x, key:'s'+x, snow:true}); });
+      // Una deuda o pago que agregaste hoy no puede tener pagos vencidos de antes de que lo agregaras.
+      const born= d.createdTs ? iso(new Date(d.createdTs)) : '0000', lo1=[lo,born].sort().pop(), pdays=pastPaydays.filter(x=>x>=born);
+      if(d.freq==='catorcena') pdays.forEach(x=>pend.push({kind:'due', date:x, key:x}));
+      else dueList(d, parseDate(lo1), addDays(parseDate(start),-1)).map(iso).forEach(x=>pend.push({kind:'due', date:x, key:x}));
+      if(extra>0 && grp==='debt') pdays.forEach(x=>pend.push({kind:'extra', date:x, key:'x'+x}));
+      if(grp==='debt') pdays.forEach(x=>{ if(snowAt(d,x)>0) pend.push({kind:'extra', date:x, key:'s'+x, snow:true}); });
       let left=remaining;
       pend.sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
         const pi=paidMap[id+'|'+e.key]; if(pi && pi.ext) return;
@@ -1656,7 +1658,8 @@ function computeSep(){
       // Si ya está pagado completo, lo que tocaba separar en esta catorcena se sigue mostrando (y contando).
       // Lo que ya abonaste salió de lo que separaste en el plan (hasta donde alcance lo separado);
       // por eso eso sigue contando como "separado" y no se le vuelve a restar a las siguientes catorcenas.
-      const recSum=e.W.filter(p=>p>=start).reduce((s,p)=>{ const r=recAt(p,id,e.key); return s+(r?Number(r.amount)||0:0); },0);
+      // Cuenta todo lo separado para esta fecha, también en catorcenas pasadas (si abonaste con eso, ya no está guardado).
+      const recSum=recs.filter(r=>!r.move && r.debtId===id && r.due===e.key && r.payday!=='paid').reduce((s,r)=>s+(Number(r.amount)||0),0);
       const paidFromPlan= pinfo && !pinfo.ext ? Math.min(Number(pinfo.amount)||0, recSum) : 0;
       const already=before(id,e.key), need=Math.max(0,cents((paid?amt:toPay+paidFromPlan)-already));
       const shares=splitEven(need, e.W.length);
@@ -1678,7 +1681,7 @@ function computeSep(){
         const rec=recAt(p,id,e.key);
         if(shares[i]<=0.005 && !rec && !paid && !mOut[i] && !(p===start && (already>0 || (pinfo && !pinfo.ext)))) return;
         const canMove= e.kind==='due' && !paid && !rec && i<e.W.length-1 && shares[i]>0.5;
-        plan[p].push({ id, name, grp: e.kind==='extra'?'extra':grp, kind:e.kind, due:e.date, key:e.key, amount:amt, toPay, paidAmt: pinfo&&!pinfo.ext?pinfo.amount:0, share:shares[i], part:i+1, of:e.W.length, already, liq, urgent:!!e.urgent, rec, paid, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'',
+        plan[p].push({ id, name, grp: e.kind==='extra'?'extra':grp, kind:e.kind, due:e.date, key:e.key, amount:amt, toPay, paidAmt: pinfo&&!pinfo.ext?pinfo.amount:0, share:shares[i], part:i+1, of:e.W.length, already:cents(Math.max(0,already-paidFromPlan)), liq, urgent:!!e.urgent, rec, paid, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'',
           movedOut:mOut[i], movedTo:mOut[i]?e.W[i+1]:null, movedIn:mIn[i], movedFrom:mFrom[i], moveTo:canMove?e.W[i+1]:null, payday:p });
       });
     });
