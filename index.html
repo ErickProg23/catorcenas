@@ -598,6 +598,7 @@ button.dd-pay svg{width:14px;height:14px;margin-left:8px;opacity:.6;flex:none;}
 .login .err{margin-top:14px;}
 .importlink{margin-top:14px;font-size:13.5px;color:var(--ink-soft);}
 body.nologin .bnav, body.nologin #fabTop, body.nologin .tabs{display:none !important;}
+.sitem.isSkip .t,.sitem.isSkip .samt{opacity:.55}
 </style>
 </head>
 <body>
@@ -1622,6 +1623,7 @@ function computeSep(){
       let left=remaining;
       pend.sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
         const pi=paidMap[id+'|'+e.key]; if(pi && pi.ext) return;
+        if(e.kind==='extra' && S.sep[skipKey(id,e.key)]) return;
         const full=e.kind==='extra'?(e.snow?snowAt(d,e.date):extra):amt0, pAmt=pi?pi.amount:0;
         const amt=cents(Math.min(Math.max(0,full-pAmt), left)); if(amt<=0.5) return; left-=amt;
         pending.push({ id, name, grp: e.kind==='extra'?'extra':grp, kind:e.kind, due:e.date, key:e.key, amount:full, toPay:amt, paidAmt:pAmt, share:amt, part:1, of:1, already:0, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'' });
@@ -1643,6 +1645,10 @@ function computeSep(){
     // En orden de fecha; el mismo día, primero el pago obligatorio.
     ev.sort((a,b)=>a.date.localeCompare(b.date)||(a.kind==='due'?-1:1));
     ev.forEach(e=>{
+      if(e.kind==='extra' && S.sep[skipKey(id,e.key)]){
+        const p=e.W[0]; if(plan[p]) plan[p].push({ id, name, grp:'extra', kind:'extra', due:e.date, key:e.key, amount:cents(e.amount), toPay:0, paidAmt:0, share:0, part:1, of:1, already:0, liq:false, urgent:false, rec:null, paid:null, snow:!!e.snow, snowSrc:e.snow?snowSrcNames(d,e.date):'', skipped:true, payday:p });
+        return;
+      }
       // Lo ya pagado de esta fecha (abonos o gastos ligados) se descuenta de lo que falta pagar;
       // como el saldo ya refleja esos abonos, solo lo que falta pagar consume el saldo restante.
       const pinfo=paidMap[id+'|'+e.key];
@@ -1741,6 +1747,9 @@ function payStateHtml(it, ix, canPay, attr){
 function sepItemHtml(it, ix, isNow, p){
   const isExtra=it.kind==='extra', done=!!it.rec, got=done?Number(it.rec.amount)||0:0;
   const g0=it.kind==='save'?S.goals[it.goalId]:null;
+  if(it.skipped) return '<div class="sitem isSkip" data-ix="'+ix+'">'+(isNow?'<label class="scheck"><input type="checkbox" disabled><span aria-hidden="true"></span></label>':'')+
+    '<div class="sinfo"><div class="sbody"><span class="t">'+esc(it.name)+'</span><span class="s">Abono extra de '+money(it.amount)+' · esta catorcena no lo das</span></div>'+
+    (isNow?'<div class="mvrow"><button type="button" class="linkbtn" data-unskip="'+ix+'">Deshacer</button></div>':'')+'</div><span class="samt">'+money2(0)+'</span></div>';
   const sub = it.kind==='save' ? 'Para tu meta de '+money(g0?g0.target:0)+' · llevas '+money(goalBal(it.goalId)) : isExtra ? (it.snow ? 'Bola de nieve · lo que liberaste de '+esc(it.snowSrc||'otra deuda') : 'Voluntario · lo abonas cuando cobras')
     : (it.kind==='due' && it.of>1 ? 'Parte '+it.part+' de '+it.of+' · ' : '')+fmtLong(parseDate(it.due))+(isNow && !it.paid?' · '+whenTxt(it.due):'')+(it.of>1?' · pago de '+money(it.amount):'');
   const notes=[];
@@ -1773,6 +1782,12 @@ function pendingHtml(it, ix){
 }
 
 /* Pasar parte de lo que toca separar a la siguiente catorcena (antes de la fecha de pago). */
+function skipKey(id,key){ return 'skip_'+id+'_'+key; }
+async function skipExtra(it, on){
+  const ref=db.collection('sepDone').doc(skipKey(it.id,it.key)), ops=[ on ? ref.set({ skip:true, id:it.id, key:it.key, ts:Date.now() }) : ref.delete() ];
+  if(on && it.rec) ops.push(db.collection('sepDone').doc(sepKey(it.payday||it.due,it.id,it.key)).delete());
+  return saved(Promise.all(ops));
+}
 function mvKey(it){ return 'mv_'+it.payday+'_'+it.id+'_'+it.key; }
 function openMoveSep(it){
   const prev=S.sep[mvKey(it)];
@@ -2017,6 +2032,7 @@ function renderSeparar(){
   m.querySelectorAll('[data-open]').forEach(b=> b.onclick=()=>{ if(isNow) openSepItem(list[Number(b.dataset.open)], p); });
   m.querySelectorAll('[data-mv]').forEach(b=> b.onclick=()=> openMoveSep(list[Number(b.dataset.mv)]));
   m.querySelectorAll('[data-unmv]').forEach(b=> b.onclick=()=> undoMoveSep(list[Number(b.dataset.unmv)]));
+  m.querySelectorAll('[data-unskip]').forEach(b=> b.onclick=async()=>{ const it=list[Number(b.dataset.unskip)]; b.disabled=true; if(await skipExtra(it,false)) toast('Abono extra de '+it.name+' de regreso en esta catorcena'); else b.disabled=false; });
   m.querySelectorAll('[data-pay]').forEach(b=> b.onclick=()=>{ const it=list[Number(b.dataset.pay)]; if(it.paid) openPaidInfo(it); else openPaySep(it); });
   m.querySelectorAll('[data-ppay]').forEach(b=> b.onclick=()=> openPaySep(pending[Number(b.dataset.ppay)]));
   m.querySelectorAll('[data-pext]').forEach(b=> b.onclick=async()=>{
@@ -2091,9 +2107,20 @@ function openSepItem(it, p){
   openModal('<h3>'+esc(it.name)+'</h3><p class="sub">'+(isExtra?'Abono extra voluntario de '+money(it.amount):'Pago de '+money2(it.amount)+' el '+fmtLong(parseDate(it.due)))+'. Para esta catorcena toca separar '+money2(it.share)+'.</p>'+
     '<div class="field"><label for="mNow">Separé de este pago</label><input class="amount-in" id="mNow" type="text" inputmode="decimal" autocomplete="off" placeholder="'+it.share+'" value="'+(now?Number(now.amount):'')+'"></div>'+
     (isExtra?'':'<div class="optional"><label for="mPrev">Ya tenía separado de antes para este pago (opcional)</label><input id="mPrev" type="text" inputmode="decimal" autocomplete="off" placeholder="0" value="'+(prev?Number(prev.amount):'')+'"><p class="hint">Lo que apartaste antes de usar esta sección. Se descuenta de lo que falta separar.</p></div>')+
-    '<p class="note">Si separas menos, lo que falta se pasa a las siguientes catorcenas antes de la fecha de pago. Deja vacío para quitar la marca.</p><p class="err" hidden></p>'+
+    (isExtra?'<p class="note">Aquí solo marcas cuánto apartaste. ¿No vas a dar este abono?</p>'+
+      '<button type="button" class="btn-ghost" id="mSkip" style="width:100%;margin-bottom:8px">No darlo en esta catorcena</button>'+
+      (it.snow?'':'<button type="button" class="btn-ghost" id="mNoExtra" style="width:100%;margin-bottom:12px">Ya no dar abono extra a '+esc(it.name)+' (en ninguna)</button>')
+      :'<p class="note">Si separas menos, lo que falta se pasa a las siguientes catorcenas antes de la fecha de pago. Deja vacío para quitar la marca.</p>')+'<p class="err" hidden></p>'+
     '<div class="actions"><button type="button" class="btn-ghost" data-close>Cancelar</button><button type="button" class="btn-primary grow" id="mSave">Guardar</button></div>', box=>{
     const save=box.querySelector('#mSave'); onEnter(box,save);
+    const sk=box.querySelector('#mSkip');
+    if(sk) sk.onclick=async()=>{ sk.disabled=true; const ok=await skipExtra(Object.assign({},it,{payday:p}),true); if(ok){ closeModal(); toast('Listo, esta catorcena no das abono extra a '+it.name+'. Esos '+money(it.amount)+' quedan libres.'); } else sk.disabled=false; };
+    const noX=box.querySelector('#mNoExtra');
+    if(noX) noX.onclick=async()=>{
+      if(!await askConfirm({ title:'¿Quitar el abono extra?', msg:'Dejas de separar '+money(it.amount)+' extra por catorcena para '+esc(it.name)+'. Su pago normal sigue igual. Lo puedes volver a poner en Deudas › '+esc(it.name)+' › Editar.', ok:'Sí, quitar abono extra', warn:false })) return;
+      const ops=[db.collection('debts').doc(it.id).update({ extra:0 })]; if(now) ops.push(db.collection('sepDone').doc(keyNow).delete());
+      const ok=await saved(Promise.all(ops)); if(ok){ closeModal(); toast('Listo, ya no hay abono extra a '+it.name); }
+    };
     save.onclick=async()=>{
       const read=sel=>{ const el=box.querySelector(sel); if(!el) return null; const raw=el.value.trim(); if(raw==='') return 0; const v=parseAmt(raw); return isFinite(v)&&v>=0 ? cents(v) : NaN; };
       const vNow=read('#mNow'), vPrev=read('#mPrev');
