@@ -2360,7 +2360,7 @@ function goalCardHtml(){
       (lines.length?'<div class="gl-lines">'+lines.map(l=>'<div>'+l+'</div>').join('')+'</div>':'')+
       '<div class="gl-btns"><button type="button" class="btn-primary" data-gadd="'+gid+'">Agregar dinero</button><button type="button" data-gtake="'+gid+'">Retirar</button><button type="button" class="linkbtn" data-gedit="'+gid+'">Editar</button></div>'+
     '</div>';
-  }).join('');
+  }).join('')+'<button type="button" class="fxadd" data-gnew style="margin-bottom:14px">+ Nueva meta de ahorro</button>';
 }
 function wireGoals(root){
   root.querySelectorAll('[data-gnew]').forEach(b=> b.onclick=()=> openGoalForm(null));
