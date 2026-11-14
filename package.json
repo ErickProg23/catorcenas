@@ -1,0 +1,12 @@
+{
+  "name": "catorcenas-claras",
+  "private": true,
+  "description": "Pruebas del motor de Separar (la app no necesita build).",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

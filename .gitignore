@@ -1,0 +1,8 @@
+# Dependencias
+node_modules/
+
+# Respaldos con datos reales: NUNCA al repo (es público)
+respaldo*.json
+*respaldo*.json
+backup*.json
+*-backup.json
